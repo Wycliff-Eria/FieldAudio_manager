@@ -1,7 +1,4 @@
-from pathlib import Path
-import textwrap, hashlib
-
-app_code = r'''"""
+"""
 FieldAudio Manager — private beta
 - Private beta access is checked separately from CommCare credentials.
 - CommCare API credentials are held only in the current Streamlit session.
@@ -121,7 +118,7 @@ def init_session_state() -> None:
         "beta_error": "",
         "results": None,
         "failed_csv": None,
-        "zip_bytes": None,
+        "zip_path": None,
         "zip_name": "fieldaudio_audio_files.zip",
         "zip_signature": None,
         "last_upload_name": None,
@@ -158,7 +155,7 @@ def reset_commcare_session(delete_files: bool = True) -> None:
     st.session_state.session_headers = None
     st.session_state.results = None
     st.session_state.failed_csv = None
-    st.session_state.zip_bytes = None
+    st.session_state.zip_path = None
     st.session_state.zip_signature = None
     st.session_state.last_upload_name = None
 
@@ -523,7 +520,7 @@ if st.button("⬇ Start / Retry Downloads", type="primary", use_container_width=
             pd.DataFrame(failures).to_csv(index=False).encode("utf-8-sig")
             if failures else None
         )
-        st.session_state.zip_bytes = None
+        st.session_state.zip_path = None
         st.session_state.zip_signature = None
         if failures:
             st.warning(f"Finished with {len(failures)} failed file(s). Download the failure report below, then retry.")
@@ -559,24 +556,34 @@ if audio_files:
     total_bytes = sum(p.stat().st_size for p in audio_files)
     st.write(f"{len(audio_files):,} audio file(s) ready • {total_bytes / (1024 * 1024):.2f} MB before ZIP overhead.")
 
-    # Create ZIP before displaying the download button. ZIP_STORED avoids recompressing audio.
+    # Build the ZIP directly on disk, not in a BytesIO buffer. ZIP_STORED
+    # avoids CPU time spent recompressing audio files.
     signature = tuple((p.name, p.stat().st_size, p.stat().st_mtime_ns) for p in audio_files)
-    if st.session_state.zip_bytes is None or st.session_state.zip_signature != signature:
-        with st.spinner("Preparing ZIP (no compression for faster export)…"):
-            buffer = io.BytesIO()
-            with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_STORED) as zf:
+    zip_path = workspace / st.session_state.zip_name
+    if (
+        st.session_state.zip_path != str(zip_path)
+        or st.session_state.zip_signature != signature
+        or not zip_path.is_file()
+    ):
+        with st.spinner("Creating ZIP directly on disk (no compression)…"):
+            zip_path.unlink(missing_ok=True)
+            with zipfile.ZipFile(zip_path, mode="w", compression=zipfile.ZIP_STORED) as zf:
                 for path in audio_files:
                     zf.write(path, arcname=path.name)
-            st.session_state.zip_bytes = buffer.getvalue()
-            st.session_state.zip_signature = signature
-    st.download_button(
-        "⬇ Download ZIP (ZIP_STORED)",
-        data=st.session_state.zip_bytes,
-        file_name=st.session_state.zip_name,
-        mime="application/zip",
-        type="primary",
-        use_container_width=True,
-    )
+        st.session_state.zip_path = str(zip_path)
+        st.session_state.zip_signature = signature
+
+    # Streamlit accepts a binary file object for download; the ZIP itself is
+    # written directly to the session workspace rather than first copied into RAM.
+    with open(zip_path, "rb") as zip_handle:
+        st.download_button(
+            "⬇ Download ZIP (ZIP_STORED)",
+            data=zip_handle,
+            file_name=st.session_state.zip_name,
+            mime="application/zip",
+            type="primary",
+            use_container_width=True,
+        )
 else:
     st.info("No downloaded audio files are available for ZIP export yet.")
 
@@ -585,18 +592,3 @@ st.caption(
     "Private beta build. Downloaded files are isolated to this browser session's temporary workspace and are deleted when you log out/exit. "
     "Avoid using a shared or untrusted computer."
 )
-'''
-
-requirements = """streamlit>=1.39,<2.0
-pandas>=2.1,<4.0
-requests>=2.31,<3.0
-openpyxl>=3.1,<4.0
-xlrd>=2.0.1,<3.0
-"""
-
-outdir = Path("/mnt/data/fieldaudio_manager")
-outdir.mkdir(parents=True, exist_ok=True)
-(outdir / "app.py").write_text(app_code, encoding="utf-8")
-(outdir / "requirements.txt").write_text(requirements, encoding="utf-8")
-print(f"Created: {outdir / 'app.py'}")
-print(f"Created: {outdir / 'requirements.txt'}")

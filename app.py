@@ -1,13 +1,11 @@
 """
-FieldAudio Manager — private beta
-- Private beta access is checked separately from CommCare credentials.
+FieldAudio Manager
+- CommCare credentials are verified before access to the downloader.
 - CommCare API credentials are held only in the current Streamlit session.
 - Each browser session gets its own temporary workspace.
 - Audio files are downloaded in parallel and exported with ZIP_STORED.
 """
 
-import hashlib
-import hmac
 import io
 import os
 import re
@@ -35,7 +33,7 @@ st.set_page_config(
 )
 
 APP_NAME = "FieldAudio Manager"
-USER_AGENT = "FieldAudio-Manager/0.1-private-beta"
+USER_AGENT = "FieldAudio-Manager/0.1"
 AUDIO_NAME_COLUMN = "audio_name"
 AUDIO_URL_COLUMN = "survey_audio_link"
 SUPPORTED_EXTENSIONS = (".m4a", ".mp3", ".wav", ".aac", ".ogg", ".amr", ".opus")
@@ -52,20 +50,6 @@ def get_secret(name: str, default: str = "") -> str:
     except Exception:
         pass
     return os.getenv(name, default).strip()
-
-
-def get_access_hashes() -> list[str]:
-    """
-    Private-beta access hashes, not CommCare API keys.
-    Configure BETA_ACCESS_CODE_HASHES as comma-separated SHA-256 hex digests.
-    """
-    raw = get_secret("BETA_ACCESS_CODE_HASHES", "")
-    return [part.strip().lower() for part in raw.split(",") if part.strip()]
-
-
-def verify_beta_code(code: str, hashes: list[str]) -> bool:
-    candidate = hashlib.sha256(code.strip().encode("utf-8")).hexdigest()
-    return any(hmac.compare_digest(candidate, item) for item in hashes)
 
 
 def clean_filename(value: object) -> str:
@@ -108,14 +92,12 @@ def create_filenames(df: pd.DataFrame) -> list[str]:
 
 def init_session_state() -> None:
     defaults = {
-        "beta_access_granted": False,
         "authenticated": False,
         "username": "",
         "commcare_domain": "m-e-uganda",
         "session_headers": None,
         "workspace": None,
         "login_error": "",
-        "beta_error": "",
         "results": None,
         "failed_csv": None,
         "zip_path": None,
@@ -294,39 +276,7 @@ init_session_state()
 
 
 # ---------------------------------------------------------------------
-# Separate private-beta product access gate (not CommCare authentication)
-# ---------------------------------------------------------------------
-access_hashes = get_access_hashes()
-if not st.session_state.beta_access_granted:
-    st.markdown('<div class="login-card">', unsafe_allow_html=True)
-    brand_header("Private beta • Authorized testers only")
-    st.write("Enter the private testing code provided by the app owner.")
-    if not access_hashes:
-        st.error(
-            "Private beta access is not configured. The app owner must set "
-            "`BETA_ACCESS_CODE_HASHES` in Streamlit Secrets or environment variables."
-        )
-        st.caption("No customer or CommCare credentials are needed on this screen.")
-        st.stop()
-
-    with st.form("beta_access_form", clear_on_submit=False):
-        beta_code = st.text_input("Private beta access code", type="password")
-        beta_submit = st.form_submit_button("Continue to sign in", type="primary", use_container_width=True)
-    if beta_submit:
-        if verify_beta_code(beta_code, access_hashes):
-            st.session_state.beta_access_granted = True
-            st.session_state.beta_error = ""
-            st.rerun()
-        st.session_state.beta_error = "That private beta code is not valid."
-    if st.session_state.beta_error:
-        st.error(st.session_state.beta_error)
-    st.caption("This access code is separate from your CommCare username and API key.")
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.stop()
-
-
-# ---------------------------------------------------------------------
-# Full-page CommCare login (shown only after beta access)
+# Full-page CommCare login
 # ---------------------------------------------------------------------
 if not st.session_state.authenticated:
     st.markdown('<div class="login-card">', unsafe_allow_html=True)
@@ -381,15 +331,11 @@ if not st.session_state.authenticated:
 # ---------------------------------------------------------------------
 with st.sidebar:
     st.markdown(f"### 🎧 {APP_NAME}")
-    st.caption("Private beta")
+    st.caption("CommCare audio downloader")
     st.write(f"CommCare user: **{st.session_state.username}**")
     st.write(f"Domain: `{st.session_state.commcare_domain}`")
     if st.button("Log out", use_container_width=True):
         reset_commcare_session(delete_files=True)
-        st.rerun()
-    if st.button("Exit private beta", use_container_width=True):
-        reset_commcare_session(delete_files=True)
-        st.session_state.beta_access_granted = False
         st.rerun()
 
 brand_header("Upload a CSV or Excel list, download audio in parallel, and export a ZIP.")
@@ -589,6 +535,6 @@ else:
 
 st.divider()
 st.caption(
-    "Private beta build. Downloaded files are isolated to this browser session's temporary workspace and are deleted when you log out/exit. "
+    "Downloaded files are isolated to this browser session's temporary workspace and are deleted when you log out. "
     "Avoid using a shared or untrusted computer."
 )

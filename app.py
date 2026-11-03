@@ -371,12 +371,11 @@ with library_tab:
         if S.zip_path and Path(S.zip_path).is_file() and S.zip_signature:
             size=Path(S.zip_path).stat().st_size/1024**2
             st.caption(f'Archive size: {size:,.1f} MB')
-            if size <= 200:
-                with open(S.zip_path,'rb') as archive:
-                    st.download_button('Download ZIP archive',archive,file_name='commcare_recordings.zip',
-                                       mime='application/zip',on_click='ignore')
-            else:
-                st.warning('This archive exceeds the 200 MB browser-export guardrail. Export in smaller sessions or add an authenticated object-storage download service. It remains on the app server, not your computer.')
+            if size > 200:
+                st.warning('Large archive: downloading is enabled, but Streamlit holds downloadable data in server memory. Ensure the server has sufficient available RAM.')
+            with open(S.zip_path,'rb') as archive:
+                st.download_button('Download ZIP archive',archive,file_name='commcare_recordings.zip',
+                                   mime='application/zip',on_click='ignore')
         st.download_button('Export recording manifest',csv_bytes(pd.DataFrame([
             {'name':r['name'],'filename':r['filename'],'row':r['row']} for r in completed])),
             file_name='recording_manifest.csv',mime='text/csv',on_click='ignore')
@@ -403,4 +402,4 @@ with history_tab:
     st.caption('History is session-only, not a persistent audit log. Refreshes, server restarts or session expiry can lose session state.')
 
 st.divider()
-st.caption('Clear downloads or log out when finished.')
+st.caption('Audio Workspace · CommCare • Keep API keys and participant recordings private. Explicitly clear downloads or log out when finished.')
